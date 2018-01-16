@@ -10,7 +10,8 @@ object Play3 extends App {
     for {
       _ <- IO{ println(s"${Thread.currentThread().getName} Publisher") }
       v = "Hi concurrent world"
-      _ <- IO { println(s"sleeping a bit..."); Thread.sleep(3000); println(s"writing value $v") }
+      millis = 3000
+      _ <- IO { println(s"sleeping ${millis/1000} seconds..."); Thread.sleep(millis); println(s"writing value $v") }
       _ <- message.complete(v)
       _ <- IO { println(s"${Thread.currentThread().getName} Published value $v") }
     } yield ()
@@ -20,9 +21,9 @@ object Play3 extends App {
     if ( n == 0 ) IO.unit
     else fork {
       for {
-        _ <- IO { println(s"${Thread.currentThread().getName} Reader $n") }
+        _ <- IO { println(s"${Thread.currentThread().getName} Subscriber $n") }
         v <- message.get
-        _ <- IO { println(s">>> Reader $n get value $v") }
+        _ <- IO { println(s">>> Subscriber $n get value $v") }
         _ <- suscribers(n-1, message)
       } yield ()
     }
