@@ -24,9 +24,8 @@ object Play3 extends App {
         _ <- IO { println(s"${Thread.currentThread().getName} Subscriber $n") }
         v <- message.get
         _ <- IO { println(s">>> Subscriber $n get value $v") }
-        _ <- suscribers(n-1, message)
       } yield ()
-    }
+    } flatMap { _ => suscribers(n-1, message) }
 
   def dummy(l: String, n: Int, join: Promise[IO, Unit]): IO[Unit] =
     for {
@@ -59,7 +58,6 @@ object Play3 extends App {
     w <- fork {
       publisher(message)
     }
-    _ <- fork { IO {println(s"${Thread.currentThread().getName} This is a dummy fork!")} }
   } yield ()
 
   val executor = Executors.newFixedThreadPool(3)
