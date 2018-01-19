@@ -10,7 +10,9 @@ object Play4 extends App {
   def master(l: String, q: Queue[IO, Cmd], join: Promise[IO, Unit], fa: IO[String]): IO[Unit] =
     for {
       s <- fa
-      cmd = if ( s.equalsIgnoreCase("stop") ) Stop else Msg(s)
+      cmd = if ( s.equalsIgnoreCase("stop") ) Stop
+      else if ( s.equalsIgnoreCase("err") ) Err(new Exception("forced error"))
+      else Msg(s)
       _ <- IO { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
       _ <- q.enqueue1(cmd)
       _ <- cmd match {
@@ -19,8 +21,15 @@ object Play4 extends App {
       }
     } yield ()
 
-  def job(l: String, c: Cmd): IO[Unit] =
-    IO { Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+  def job(l: String, c: Cmd): IO[Unit] = c match {
+    case Msg(s) => IO { Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+    case Err(e) => for {
+      _ <- IO { println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+      _ <- IO.raiseError(e)
+      _ <- IO { println("after exception") }
+    } yield ()
+    case _ => IO.unit
+  }
 
   def worker(l: String, q: Queue[IO, Cmd],  join: Promise[IO, Unit]): IO[Unit] =
     for {
@@ -44,6 +53,7 @@ object Play4 extends App {
   sealed trait Cmd
   final case object Stop extends Cmd
   final case class Msg(s: String) extends Cmd
+  final case class Err(e: Throwable) extends Cmd
 
   def program: IO[Unit] = for {
     q <- boundedQueue[IO, Cmd](10)
