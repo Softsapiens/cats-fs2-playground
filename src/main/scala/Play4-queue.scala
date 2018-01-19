@@ -19,13 +19,19 @@ object Play4 extends App {
       }
     } yield ()
 
+  def job(l: String, c: Cmd): IO[Unit] =
+    IO { Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+
   def worker(l: String, q: Queue[IO, Cmd],  join: Promise[IO, Unit]): IO[Unit] =
     for {
       c <- q.dequeue1
       _ <- IO { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
       _ <- c match {
         case Stop => join.complete(())
-        case _ => worker(l, q, join)
+        case _ => for {
+          _ <- fork { job(s"job-${(System.currentTimeMillis/100).toString.substring(8)}", c) }
+          _ <- worker(l, q, join)
+        } yield ()
       }
     } yield ()
 
@@ -40,7 +46,7 @@ object Play4 extends App {
   final case class Msg(s: String) extends Cmd
 
   def program: IO[Unit] = for {
-    q <- boundedQueue[IO, Cmd](1000)
+    q <- boundedQueue[IO, Cmd](10)
     join1 <- Promise.empty[IO, Unit]
     join2 <- Promise.empty[IO, Unit]
     join3 <- Promise.empty[IO, Unit]
@@ -49,10 +55,10 @@ object Play4 extends App {
       master("master-StdIn", q, join1, IO { scala.io.StdIn.readLine })
     }
     _ <- fork {
-      master("master-Time1", q, join3, IO { Thread.sleep(2000); (System.currentTimeMillis/1000).toInt.toString })
+      master("master-Time1", q, join3, IO { Thread.sleep(2000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
     }
     _ <- fork {
-      master("master-Time2", q, join3, IO { Thread.sleep(4000); (System.currentTimeMillis/1000).toInt.toString })
+      master("master-Time2", q, join3, IO { Thread.sleep(4000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
     }
     _ <- fork {
       worker("worker1", q, join2)
