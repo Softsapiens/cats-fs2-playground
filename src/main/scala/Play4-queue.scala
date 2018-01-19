@@ -7,15 +7,15 @@ import scala.concurrent.ExecutionContext
 
 object Play4 extends App {
 
-  def master(l: String, q: Queue[IO, Cmd], join: Promise[IO, Unit]): IO[Unit] =
+  def master(l: String, q: Queue[IO, Cmd], join: Promise[IO, Unit], fa: IO[String]): IO[Unit] =
     for {
-      s <- IO { scala.io.StdIn.readLine }
+      s <- fa
       cmd = if ( s.equalsIgnoreCase("stop") ) Stop else Msg(s)
       _ <- IO { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
       _ <- q.enqueue1(cmd)
       _ <- cmd match {
         case Stop => join.complete(())
-        case _ => master(l, q, join)
+        case _ => master(l, q, join, fa)
       }
     } yield ()
 
@@ -43,9 +43,16 @@ object Play4 extends App {
     q <- boundedQueue[IO, Cmd](1000)
     join1 <- Promise.empty[IO, Unit]
     join2 <- Promise.empty[IO, Unit]
+    join3 <- Promise.empty[IO, Unit]
 
     _ <- fork {
-      master("master1", q, join1)
+      master("master-StdIn", q, join1, IO { scala.io.StdIn.readLine })
+    }
+    _ <- fork {
+      master("master-Time1", q, join3, IO { Thread.sleep(2000); (System.currentTimeMillis/1000).toInt.toString })
+    }
+    _ <- fork {
+      master("master-Time2", q, join3, IO { Thread.sleep(4000); (System.currentTimeMillis/1000).toInt.toString })
     }
     _ <- fork {
       worker("worker1", q, join2)
@@ -55,7 +62,7 @@ object Play4 extends App {
     }
   } yield ()
 
-  val executor = Executors.newFixedThreadPool(3)
+  val executor = Executors.newFixedThreadPool(4)
   implicit val computationPool = ExecutionContext.fromExecutor(executor)
   program.unsafeRunSync
 }
