@@ -7,13 +7,13 @@ import scala.concurrent.ExecutionContext
 
 object Play4 extends App {
 
-  def master(l: String, q: Queue[IO, Cmd], join: Promise[IO, Unit], fa: IO[String]): IO[Unit] =
+  def master[F[_]](l: String, q: Queue[F, Cmd], join: Promise[F, Unit], fa: F[String])(implicit F: Effect[F]): F[Unit] =
     for {
       s <- fa
       cmd = if ( s.equalsIgnoreCase("stop") ) Stop
       else if ( s.equalsIgnoreCase("err") ) Err(new Exception("forced error"))
       else Msg(s)
-      _ <- IO { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
+      _ <- delay { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
       _ <- q.enqueue1(cmd)
       _ <- cmd match {
         case Stop => join.complete(())
@@ -21,20 +21,22 @@ object Play4 extends App {
       }
     } yield ()
 
-  def job(l: String, c: Cmd): IO[Unit] = c match {
-    case Msg(s) => IO { Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+  def job[F[_]](l: String, c: Cmd)(implicit F: Effect[F]): F[Unit] = c match {
+    case Msg(s) => delay {
+      Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}")
+    }
     case Err(e) => for {
-      _ <- IO { println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
-      _ <- IO.raiseError(e)
-      _ <- IO { println("after exception") }
+      _ <- delay { println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+      _ <- F.raiseError[Unit](e)
+      _ <- delay { println("after exception") }
     } yield ()
-    case _ => IO.unit
+    case _ => F.pure(())
   }
 
-  def worker(l: String, q: Queue[IO, Cmd],  join: Promise[IO, Unit]): IO[Unit] =
+  def worker[F[_]](l: String, q: Queue[F, Cmd],  join: Promise[F, Unit])(implicit F: Effect[F], ec: ExecutionContext): F[Unit] =
     for {
       c <- q.dequeue1
-      _ <- IO { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
+      _ <- delay { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
       _ <- c match {
         case Stop => join.complete(())
         case _ => for {
@@ -44,10 +46,10 @@ object Play4 extends App {
       }
     } yield ()
 
-  def joiner[A](ps: List[Promise[IO, A]]) =
+  def joiner[F[_], A](ps: List[Promise[F, A]])(implicit F: Effect[F]) =
   for {
     _ <- ps.traverse_(_.get)
-    _ <- IO { println(s"${Thread.currentThread().getName} job done"); executor.shutdownNow() }
+    _ <- delay { println(s"${Thread.currentThread().getName} job done"); executor.shutdownNow() }
   } yield ()
 
   sealed trait Cmd
@@ -55,20 +57,23 @@ object Play4 extends App {
   final case class Msg(s: String) extends Cmd
   final case class Err(e: Throwable) extends Cmd
 
-  def program: IO[Unit] = for {
-    q <- boundedQueue[IO, Cmd](10)
-    join1 <- Promise.empty[IO, Unit]
-    join2 <- Promise.empty[IO, Unit]
-    join3 <- Promise.empty[IO, Unit]
+  def delay[F[_]: Effect, A](a: => A)(implicit F: Effect[F]): F[A] =
+    F.suspend(F.pure(a))
+
+  def program[F[_]](implicit F: Effect[F], ec: ExecutionContext): F[Unit] = for {
+    q <- boundedQueue[F, Cmd](10)
+    join1 <- Promise.empty[F, Unit]
+    join2 <- Promise.empty[F, Unit]
+    join3 <- Promise.empty[F, Unit]
 
     _ <- fork {
-      master("master-StdIn", q, join1, IO { scala.io.StdIn.readLine })
+      master("master-StdIn", q, join1, delay { scala.io.StdIn.readLine })
     }
     _ <- fork {
-      master("master-Time1", q, join3, IO { Thread.sleep(2000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
+      master("master-Time1", q, join3, delay { Thread.sleep(2000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
     }
     _ <- fork {
-      master("master-Time2", q, join3, IO { Thread.sleep(4000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
+      master("master-Time2", q, join3, delay { Thread.sleep(4000); (System.currentTimeMillis/100).toInt.toString.substring(8) })
     }
     _ <- fork {
       worker("worker1", q, join2)
@@ -80,5 +85,5 @@ object Play4 extends App {
 
   val executor = Executors.newFixedThreadPool(4)
   implicit val computationPool = ExecutionContext.fromExecutor(executor)
-  program.unsafeRunSync
+  program[IO].unsafeRunSync
 }
