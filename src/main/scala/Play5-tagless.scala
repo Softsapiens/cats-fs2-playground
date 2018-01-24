@@ -13,7 +13,7 @@ object Play5 extends App {
       cmd = if ( s.equalsIgnoreCase("stop") ) Stop
       else if ( s.equalsIgnoreCase("err") ) Err(new Exception("forced error"))
       else Msg(s)
-      _ <- delay { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
+      _ <- F.delay { println(s"${Thread.currentThread().getName} $l enqueuing ${cmd}") }
       _ <- q.enqueue1(cmd)
       _ <- cmd match {
         case Stop => join.complete(())
@@ -22,13 +22,13 @@ object Play5 extends App {
     } yield ()
 
   def job[F[_]](l: String, c: Cmd)(implicit F: Effect[F]): F[Unit] = c match {
-    case Msg(s) => delay {
+    case Msg(s) => F.delay {
       Thread.sleep(1000); println(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}")
     }
     case Err(e) => for {
-      _ <- delay { println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
+      _ <- F.delay { println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis/100).toString.substring(8)}") }
       _ <- F.raiseError[Unit](e)
-      _ <- delay { println("after exception") }
+      _ <- F.delay { println("after exception") }
     } yield ()
     case _ => F.pure(())
   }
@@ -36,7 +36,7 @@ object Play5 extends App {
   def worker[F[_]](l: String, q: Queue[F, Cmd],  join: Promise[F, Unit])(implicit F: Effect[F], ec: ExecutionContext): F[Unit] =
     for {
       c <- q.dequeue1
-      _ <- delay { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
+      _ <- F.delay { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
       _ <- c match {
         case Stop => join.complete(())
         case _ => for {
@@ -49,16 +49,13 @@ object Play5 extends App {
   def joiner[F[_], A](ps: List[Promise[F, A]])(implicit F: Effect[F]) =
   for {
     _ <- ps.traverse_(_.get)
-    _ <- delay { println(s"${Thread.currentThread().getName} job done"); executor.shutdownNow() }
+    _ <- F.delay { println(s"${Thread.currentThread().getName} job done"); executor.shutdownNow() }
   } yield ()
 
   sealed trait Cmd
   final case object Stop extends Cmd
   final case class Msg(s: String) extends Cmd
   final case class Err(e: Throwable) extends Cmd
-
-  def delay[F[_]: Effect, A](a: => A)(implicit F: Effect[F]): F[A] =
-    F.suspend(F.pure(a))
 
   def program[F[_]](implicit F: Effect[F], StdIOF: StdInAlg[F], TimeIOF: TimeAlg[F], ec: ExecutionContext): F[Unit] = for {
     q <- boundedQueue[F, Cmd](10)
@@ -89,8 +86,8 @@ object Play5 extends App {
   }
 
   implicit object TimeIO extends TimeAlg[IO] {
-    def timeFrom(w: Long): IO[String] = delay[IO, String] {
-      Thread.sleep(2000)
+    def timeFrom(w: Long): IO[String] = implicitly[Effect[IO]].delay {
+      Thread.sleep(2000) // PENDING:  scheduler.effect.sleep[IO](100.millis) // for a non-blocking waits
       (System.currentTimeMillis/100).toInt.toString.substring(8)
     }
   }
@@ -100,12 +97,39 @@ object Play5 extends App {
   }
 
   implicit object StdInIO extends StdInAlg[IO] {
-    def readLine: IO[String] = delay[IO, String] { scala.io.StdIn.readLine }
+    def readLine: IO[String] = implicitly[Effect[IO]].delay { scala.io.StdIn.readLine }
   }
-
 
   val executor = Executors.newFixedThreadPool(4)
   implicit val computationPool = ExecutionContext.fromExecutor(executor)
+
+  sys.addShutdownHook { executor.shutdownNow }
+
+  type TestF[A] = StateT[IO, List[String], A]
+
+  implicit object StdInTl extends StdInAlg[TestF] {
+    def readLine: TestF[String] = StateT {
+      case x :: xs =>
+        println(s"value= ${x}")
+        implicitly[Effect[IO]].pure {
+          (xs, x)
+        }
+      // PENDING: what happens when input list is empty?
+      case Nil => println(s"NIL"); implicitly[Effect[IO]].raiseError(new Exception("Empty input!"))
+    }
+  }
+
+  implicit object TimeTl extends TimeAlg[TestF] {
+    def timeFrom(w: Long): TestF[String] = StateT { ls =>
+      implicitly[Effect[IO]].delay {
+        println(s"state=${ls}")
+        Thread.sleep(w) // PENDING:  scheduler.effect.sleep[IO](100.millis) // for a non-blocking waits
+        val t = (System.currentTimeMillis/100).toInt.toString.substring(8)
+
+        (ls, t)
+      }
+    }
+  }
 
   program[IO].unsafeRunSync
 }
