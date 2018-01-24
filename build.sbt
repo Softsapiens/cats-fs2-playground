@@ -16,6 +16,8 @@ scalacOptions ++= Seq(
 
 //scalacOptions += "-Ypartial-unification"
 
+addCompilerPlugin("org.spire-math" %% "kind-projector" % "0.9.4")
+
 ensimeIgnoreMissingDirectories in ThisBuild := true
 ensimeIgnoreScalaMismatch in ThisBuild := true
 
