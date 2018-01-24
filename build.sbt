@@ -3,7 +3,7 @@ scalaVersion := "2.11.8"
 libraryDependencies ++= Seq(
   "org.typelevel" %% "cats-core" % "1.0.1",
   "org.typelevel" %% "cats-effect" % "0.8",
-  "co.fs2" %% "fs2-core" % "0.10.0-M11"
+  "co.fs2" %% "fs2-core" % "0.10.0-RC1"
 )
 
 scalacOptions ++= Seq(
