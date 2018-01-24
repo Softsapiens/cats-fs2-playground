@@ -33,7 +33,7 @@ object Play5 extends SafeApp {
     case CMsg(s) => for {
       res <- F.delay {
         Thread.sleep(1000)
-        val v = RSuccess(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis / 100).toString.substring(8)}")
+        val v = RSuccess(s"${Thread.currentThread().getName} $l has processed ${c} at ${(System.currentTimeMillis / 100).toInt.toString.substring(6)}")
         println(v)
         v
       }
@@ -41,7 +41,7 @@ object Play5 extends SafeApp {
     } yield ()
     case CErr(e) => for {
       _ <- F.delay {
-        println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis / 100).toString.substring(8)}")
+        println(s"${Thread.currentThread().getName} $l throws exception ${c} at ${(System.currentTimeMillis / 100).toInt.toString.substring(6)}")
       }
       _ <- F.raiseError[Unit](e)
       _ <- q.enqueue1(RErr(e))
@@ -54,7 +54,12 @@ object Play5 extends SafeApp {
       c <- qIn.dequeue1
       _ <- F.delay { println(s"${Thread.currentThread().getName} $l dequeuing ${c}") }
       _ <- c match {
-        case CStop => join.complete(())
+        case CStop => for {
+          _ <- F.delay {
+            println(s"${Thread.currentThread().getName} $l stopping at ${(System.currentTimeMillis / 100).toInt.toString.substring(6)}")
+          }
+          _ <- join.complete(())
+        }yield ()
         case _ => for {
           _ <- fork { job(s"job-${(System.currentTimeMillis/100).toString.substring(8)}", c, qOut) }
           _ <- worker(l, qIn, qOut, join)
@@ -118,7 +123,7 @@ object Play5 extends SafeApp {
     def timeFrom(w: Long): IO[String] = for {
       _ <- scheduler.effect.sleep(FiniteDuration(w, "s"))
       r <- F.delay {
-        (System.currentTimeMillis/100).toInt.toString.substring(8)
+        (System.currentTimeMillis/100).toInt.toString.substring(6)
       }
     } yield (r)
   }
